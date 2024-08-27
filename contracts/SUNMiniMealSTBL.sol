@@ -44,7 +44,7 @@ abstract contract Ownable is Context {
         address indexed newOwner
     );
 
-     /**
+    /**
      * @dev Initializes the contract setting the address provided by the deployer as the initial owner.
      */
     constructor(address initialOwner) {
@@ -664,39 +664,16 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
  * @title SUNMinimealSTBLCoin
  * @dev ERC20 token contract for SUN Minimeal STBL
  */
-contract SUNMinimealSTBL is ERC20, Ownable,ReentrancyGuard {
-    address public STBLFarm;
+contract SUNMinimealSTBL is ERC20, Ownable, ReentrancyGuard {
 
-    error CallerUnauthorizedAccount(address account);
-
-    modifier onlySTBLFarm() {
-        if (msg.sender != STBLFarm) {
-            revert CallerUnauthorizedAccount(msg.sender);
-        }
-        _;
-    }
-
-
- struct AirdropDetail {
+    struct AirdropDetail {
         uint256 id;
         uint256 user_id;
         address recipient;
         uint256 amount;
     }
 
-    struct PLSAirdropDetail {
-        uint256 id;
-        uint256 user_id;
-        address payable recipient;
-    }
-
     mapping(uint256 => bool) public usedBatch;
-
-    mapping(uint256 => bool) public PLSusedBatch;
-
-    mapping(uint256 => bool) public isClaimed;
-
-    mapping(address => bool) public isthisWalletClaimed;
 
     // Event declarations
     event Claim(AirdropDetail[] airdropDetails, uint256 indexed batchId);
@@ -704,11 +681,14 @@ contract SUNMinimealSTBL is ERC20, Ownable,ReentrancyGuard {
 
     /**
      * @dev Constructor function to initialize the token contract.
-    */
-    constructor(address _owner,address _liquidityCreator,uint256 _initialLiquidity) ERC20("SUN Minimeal", "STBL") Ownable(_owner) {
-        _mint(_liquidityCreator,_initialLiquidity);
+     */
+    constructor(
+        address _owner,
+        address _liquidityCreator,
+        uint256 _initialLiquidity
+    ) ERC20("SUN Minimeal", "STBL") Ownable(_owner) {
+        _mint(_liquidityCreator, _initialLiquidity);
     }
-
 
     /**
      * @dev Function to return the number of decimals used by the token.
@@ -728,21 +708,11 @@ contract SUNMinimealSTBL is ERC20, Ownable,ReentrancyGuard {
         emit Burn(_amount, _userId, _msgSender());
     }
 
-
-     /**
-     * @dev Function for farming contract to mint reward.
-     * @param to token receiver address
-     * @param amount amount of token
-     */
-    function mintReward(address to, uint256 amount) public onlySTBLFarm nonReentrant {
-        _mint(to, amount);
-    }
-
     /**
      * @dev Function for admin to send tokens to user.
      * @param airdropDetails users address and their respective claim amount
      * @param _batchId batch id.
-    */
+     */
     function claim(
         AirdropDetail[] calldata airdropDetails,
         uint256 _batchId
@@ -756,12 +726,4 @@ contract SUNMinimealSTBL is ERC20, Ownable,ReentrancyGuard {
         emit Claim(airdropDetails, _batchId);
     }
 
-    /**
-     * @dev Function to set the STBLFarm address.
-     * @param _stblFarmingContract Address of the STBLFarm.
-     */
-    function setSTBLFarmingContract(address _stblFarmingContract) public onlyOwner {
-        require(address(_stblFarmingContract) != address(0));
-        STBLFarm = _stblFarmingContract;
-    }
 }
