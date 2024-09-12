@@ -166,13 +166,6 @@ abstract contract ReentrancyGuard {
     }
 }
 
-// Interface defining the function to update STBL rewards
-// interface STBLUpdater {
-
-//     function reduceTotalSTBLReward(uint256 newReward) external;
-
-// }
-
 /**
  * @dev Interface of the ERC20 standard as defined in the EIP.
  */
@@ -665,6 +658,16 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
  * @dev ERC20 token contract for SUN Minimeal STBL
  */
 contract SUNMinimealSTBL is ERC20, Ownable, ReentrancyGuard {
+    address public STBLFarm;
+    
+    error InvalidAmount();    
+    error BatchAlreadyUsed(uint256 batchId);
+    error EmptyAirdropDetails();
+    error InvalidRecipient();
+
+    // Events
+    event Claimed(AirdropDetail[] airdropDetails, uint256 indexed batchId);
+    event Burned(uint256 indexed userId, uint256 amount, address userAddress);
 
     struct AirdropDetail {
         uint256 id;
@@ -675,18 +678,11 @@ contract SUNMinimealSTBL is ERC20, Ownable, ReentrancyGuard {
 
     mapping(uint256 => bool) public usedBatch;
 
-    // Event declarations
-    event Claim(AirdropDetail[] airdropDetails, uint256 indexed batchId);
-    event Burn(uint indexed userId, uint amount, address userAddress);
-
-    /**
-     * @dev Constructor function to initialize the token contract.
-     */
     constructor(
         address _owner,
         address _liquidityCreator,
         uint256 _initialLiquidity
-    ) ERC20("SUN Minimeal", "STBL") Ownable(_owner) {
+    ) ERC20("SUN Minimeal STBL", "STBL") Ownable(_owner) {
         _mint(_liquidityCreator, _initialLiquidity);
     }
 
@@ -703,9 +699,10 @@ contract SUNMinimealSTBL is ERC20, Ownable, ReentrancyGuard {
      * @param _amount The amount of tokens to burn.
      * @param _userId ID of the user.
      */
-    function burn(uint256 _amount, uint _userId) public virtual {
+    function burn(uint256 _amount, uint256 _userId) public virtual {
+        if (_amount == 0) revert InvalidAmount();
         _burn(_msgSender(), _amount);
-        emit Burn(_amount, _userId, _msgSender());
+        emit Burned(_userId,_amount, _msgSender());
     }
 
     /**
@@ -713,17 +710,27 @@ contract SUNMinimealSTBL is ERC20, Ownable, ReentrancyGuard {
      * @param airdropDetails users address and their respective claim amount
      * @param _batchId batch id.
      */
-    function claim(
-        AirdropDetail[] calldata airdropDetails,
-        uint256 _batchId
-    ) public nonReentrant onlyOwner {
-        require(!usedBatch[_batchId], "batch id already used");
+    function claim(AirdropDetail[] calldata airdropDetails, uint256 _batchId)
+        external
+        nonReentrant
+        onlyOwner
+    {
+        if (usedBatch[_batchId]) revert BatchAlreadyUsed(_batchId);
+        if (airdropDetails.length == 0) revert EmptyAirdropDetails();
 
-        for (uint256 i = 0; i < airdropDetails.length; i++) {
+        uint256 length = airdropDetails.length;
+        for (uint256 i = 0; i < length; ) {
+            if (airdropDetails[i].recipient == address(0))
+                revert InvalidRecipient();
+            if (airdropDetails[i].amount == 0) revert InvalidAmount();
+
             _mint(airdropDetails[i].recipient, airdropDetails[i].amount);
+            unchecked {
+                ++i;
+            }
         }
-        usedBatch[_batchId] = true;
-        emit Claim(airdropDetails, _batchId);
-    }
 
+        usedBatch[_batchId] = true;
+        emit Claimed(airdropDetails, _batchId);
+    }
 }
