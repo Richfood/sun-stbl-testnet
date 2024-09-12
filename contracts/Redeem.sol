@@ -258,8 +258,8 @@ contract Redeem is Ownable, ReentrancyGuard {
     address public pulsexRouter;
     address public sunMinimealSOILToken;
 
-    uint public STBLLimitPerTransaction = 4000;
-    uint256 public constant DAY_IN_SECONDS = 86400; // 24 hours
+    uint256 public STBLLimitPerTransaction = 20000;
+    uint256 public HOURS_GAP = 120 hours;
 
     mapping(address => uint256) public mintedTokens;
     mapping(address => uint256) public lastMintTimestamp;
@@ -435,6 +435,10 @@ contract Redeem is Ownable, ReentrancyGuard {
         STBLLimitPerTransaction = _amount;
     }
 
+    function setHoursGap(uint256 _hours) public onlyOwner{
+        HOURS_GAP = _hours * 1 hours;
+    }
+
     function setRouter(address _router) public onlyOwner {
         pulsexRouter = _router;
     }
@@ -461,7 +465,7 @@ contract Redeem is Ownable, ReentrancyGuard {
         );
 
          // Check if 24 hours have passed since the last mint
-        if (block.timestamp > lastMintTimestamp[msg.sender] + DAY_IN_SECONDS) {
+        if (block.timestamp > lastMintTimestamp[msg.sender] + HOURS_GAP) {
             // Reset the minted token count for the new day
             mintedTokens[msg.sender] = 0;
             lastMintTimestamp[msg.sender] = block.timestamp;
@@ -497,5 +501,4 @@ contract Redeem is Ownable, ReentrancyGuard {
         // Emit event indicating redemption
         emit Redeemed(msg.sender, amountIn, mmBalance, _userId);
     }
-
 }
