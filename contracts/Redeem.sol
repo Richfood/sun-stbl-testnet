@@ -264,28 +264,6 @@ contract Redeem is Ownable, ReentrancyGuard {
     mapping(address => uint256) public mintedTokens;
     mapping(address => uint256) public lastMintTimestamp;
 
-    //struct to manage user staking data
-    struct userData {
-        uint staked;
-        uint reward;
-        bool isStaked;
-    }
-
-    //Mapping will return the data of user
-    mapping(address => userData) public stakingData;
-
-    //Show the total staked STBL
-    uint256 public totalTBLStaked;
-
-    //array to track all stakers
-    address[] public stakers;
-
-    //event log for all function of STBL farm
-
-    event Stake(uint value, address userAddress, uint userId);
-
-    event UnStake(uint value, address userAddress, uint userId);
-
     event Redeemed(
         address indexed user,
         uint tblAmount,
@@ -293,149 +271,21 @@ contract Redeem is Ownable, ReentrancyGuard {
         uint userId
     );
 
-    event Swap(
-        address indexed user,
-        address amountInToken,
-        uint amountIn,
-        address amountOutToken,
-        uint amountOut,
-        uint userId
-    );
-
     /**
      * @dev constructor for itializing the contract
      *Assingn the global variables to local variable.
      */
-    constructor(
-        address _STBLToken,
-        address _router,
-        address _SUNMinimealSOIL
-    ) Ownable(msg.sender) {
+    constructor(address _owner, address _router, address _stblCoin, address _soilCoin) Ownable(_owner) {
         pulsexRouter = _router;
-        stblCoin = _STBLToken;
-        sunMinimealSOILToken = _SUNMinimealSOIL;
-    }
-
-    /**
-     * @dev internal stake function
-     * @param _stakeAmount will be amount which user want to stake.
-     * @param  _user user address
-     */
-
-    function _stake(uint256 _stakeAmount, address _user) private {
-        require(
-            ERC20(stblCoin).allowance(msg.sender, address(this)) >=
-                _stakeAmount,
-            "TBLStaking: Insufficient allowance"
-        );
-
-        require(_stakeAmount > 0, "TBLStaking: Cannot stake zero tokens");
-
-        ERC20(stblCoin).transferFrom(msg.sender, address(this), _stakeAmount);
-
-        if (!stakingData[_user].isStaked) {
-            stakers.push(_user);
-            stakingData[_user].isStaked = true;
-        }
-
-        stakingData[_user].staked += _stakeAmount;
-        totalTBLStaked += _stakeAmount;
-    }
-
-    /**
-     * @dev Create the user Staking
-     * @param _stakeAmount amount to mint
-     */
-    function stake(uint256 _stakeAmount, uint256 _userId) public {
-        _stake(_stakeAmount, msg.sender);
-        emit Stake(_stakeAmount, msg.sender, _userId);
-    }
-
-    /**
-     * @dev Function to unstake or claim rewards.
-     */
-    function unstakeOrClaim(
-        uint256 _amount,
-        uint256 _userId
-    ) public nonReentrant {
-        require(
-            stakingData[msg.sender].staked >= _amount &&
-                stakingData[msg.sender].isStaked,
-            "No amount to unstake or claim"
-        );
-
-        // Add stable rewards to sender's total amount to unstake
-        uint256 totalAmountToUnstake = _amount;
-        uint contractBalance = ERC20(stblCoin).balanceOf(address(this));
-        require(contractBalance >= totalAmountToUnstake, "Insufficient funds");
-        // Transfer the total amount to unstake to the sender
-        ERC20(stblCoin).transfer(msg.sender, totalAmountToUnstake);
-
-        totalTBLStaked -= _amount;
-
-        // Reset stake data
-        stakingData[msg.sender].staked -= _amount;
-
-        if (stakingData[msg.sender].staked == 0) {
-            stakingData[msg.sender].isStaked = false;
-            // Remove the address from the list of stakers
-            for (uint256 i = 0; i < stakers.length; i++) {
-                if (stakers[i] == msg.sender) {
-                    stakers[i] = stakers[stakers.length - 1];
-                    // Move the last element to the position of the removed element
-                    stakers.pop(); // Remove the last element
-                    break; // Exit the loop
-                }
-            }
-        }
-
-        emit UnStake(_amount, msg.sender, _userId);
-    }
-
-    function swap(
-        uint amountIn,
-        address amountInToken,
-        uint amountOut,
-        address amountOutToken,
-        uint _userId
-    ) external {
-        require(
-            amountIn > 0 && amountOut > 0,
-            "Amounts must be greater than zero"
-        );
-
-        // Approve tokens for Uniswap router
-        ERC20(amountInToken).transferFrom(msg.sender, address(this), amountIn);
-        ERC20(amountInToken).approve(pulsexRouter, amountIn);
-
-        // Prepare path for token swap
-        address[] memory path = new address[](2);
-        path[0] = amountInToken;
-        path[1] = amountOutToken;
-
-        // Perform swap through Uniswap router
-        IPulseXSwapRouter(pulsexRouter).swapExactTokensForTokensV2(
-            amountIn,
-            amountOut,
-            path,
-            msg.sender
-        );
-
-        emit Swap(
-            msg.sender,
-            amountInToken,
-            amountIn,
-            amountOutToken,
-            amountOut,
-            _userId
-        );
+        stblCoin=_stblCoin;
+        sunMinimealSOILToken=_soilCoin;
     }
 
     function setSTBLLimitPerTransaction(uint _amount) public onlyOwner {
         STBLLimitPerTransaction = _amount;
     }
 
-    function setHoursGap(uint256 _hours) public onlyOwner{
+    function setHoursGap(uint256 _hours) public onlyOwner {
         HOURS_GAP = _hours * 1 hours;
     }
 
@@ -464,7 +314,7 @@ contract Redeem is Ownable, ReentrancyGuard {
             "you can't redeem more than a limit"
         );
 
-         // Check if 24 hours have passed since the last mint
+        // Check if 24 hours have passed since the last mint
         if (block.timestamp > lastMintTimestamp[msg.sender] + HOURS_GAP) {
             // Reset the minted token count for the new day
             mintedTokens[msg.sender] = 0;
@@ -472,7 +322,10 @@ contract Redeem is Ownable, ReentrancyGuard {
         }
 
         // Ensure the wallet can mint the requested amount
-        require(mintedTokens[msg.sender] + amountIn <= STBLLimitPerTransaction, "Minting limit exceeded for today");
+        require(
+            mintedTokens[msg.sender] + amountIn <= STBLLimitPerTransaction,
+            "Minting limit exceeded for today"
+        );
 
         // Increment the minted token count
         mintedTokens[msg.sender] += amountIn;
