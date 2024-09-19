@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.20;
 
-interface ERC20 {
+interface IERC20 {
     /**
      * @dev Emitted when `value` tokens are moved from one account (`from`) to
      * another (`to`).
@@ -87,10 +87,9 @@ interface ERC20 {
     function burn(uint256 _amount, uint256 _userId) external;
 }
 
-
-contract StakeUnstake{
+contract StakeUnstake {
     bytes private constant PREFIX = "\x19Ethereum Signed Message:\n32";
-    address public stblCoin;
+    address public stblToken;
     address public Verifier;
 
     //struct to manage user staking data
@@ -102,8 +101,11 @@ contract StakeUnstake{
     //Mapping will return the data of user
     mapping(address => userData) public stakingData;
 
+    // Mapping to store staker indices
+    mapping(address => uint256) private stakerIndices;
+
     //Show the total staked STBL
-    uint256 public totalTBLStaked;
+    uint256 public totalStblStaked;
 
     //array to track all stakers
     address[] public stakers;
@@ -119,7 +121,7 @@ contract StakeUnstake{
      *Assingn the global variables to local variable.
      */
     constructor(address _verifier, address _STBLToken) {
-        stblCoin = _STBLToken;
+        stblToken = _STBLToken;
         Verifier = _verifier;
     }
 
@@ -155,22 +157,27 @@ contract StakeUnstake{
         require(signer == Verifier, "invalid signature");
 
         require(
-            ERC20(stblCoin).allowance(msg.sender, address(this)) >=
+            IERC20(stblToken).allowance(msg.sender, address(this)) >=
                 _stakeAmount,
             "TBLStaking: Insufficient allowance"
         );
 
-        require(_stakeAmount > 0, "TBLStaking: Cannot stake zero tokens");
+        require(_stakeAmount > 0, "Cannot stake zero tokens");
 
-        ERC20(stblCoin).transferFrom(msg.sender, address(this), _stakeAmount);
+        require(
+            IERC20(stblToken).transferFrom(_user, address(this), _stakeAmount),
+            "Transfer failed"
+        );
 
         if (!stakingData[_user].isStaked) {
-            stakers.push(_user);
-            stakingData[_user].isStaked = true;
+            if (!stakingData[_user].isStaked) {
+                stakerIndices[_user] = stakers.length;
+                stakers.push(_user);
+                stakingData[_user].isStaked = true;
+            }
         }
-
         stakingData[_user].staked += _stakeAmount;
-        totalTBLStaked += _stakeAmount;
+        totalStblStaked += _stakeAmount;
     }
 
     /**
@@ -214,38 +221,50 @@ contract StakeUnstake{
     }
 
     /**
-     * @dev Unstakes the user's staked amount and claims rewards if applicable.
-     * The function transfers the staked amount back to the user and updates the staking data.
-     * Requirements:
-     * - The caller must have staked a positive amount.
-     * - Uses reentrancy guard to prevent reentrant attacks.
-     *
-     * @param _userId The ID of the user performing the unstake operation.
-     *
-     * Emits an {UnStake} event indicating the user's unstaked amount and ID.
+     * @dev Function to unstake principal
+     * @param _amount Amount to unstake
+     * @param _userId User ID
      */
-    function unstakeOrClaim(uint256 _userId) public {
-        // Ensure the user has staked some amount
+    function unstake(uint256 _amount, uint256 _userId) external {
         require(
-            stakingData[msg.sender].staked > 0,
-            "Insufficient staked amount"
+            stakingData[msg.sender].staked >= _amount &&
+                stakingData[msg.sender].isStaked,
+            "No amount to unstake or claim"
         );
 
-        // Fetch user's staked amount
-        uint256 stakedAmount = stakingData[msg.sender].staked;
+        uint256 contractBalance = IERC20(stblToken).balanceOf(address(this));
+        require(contractBalance >= _amount, "Insufficient funds");
 
-        // Calculate the total amount to transfer (staked + rewards)
-        uint256 totalAmountToUnstake = stakedAmount;
+        require(
+            IERC20(stblToken).transfer(msg.sender, _amount),
+            "Transfer failed"
+        );
+        totalStblStaked -= _amount;
+        stakingData[msg.sender].staked -= _amount;
 
-        // Transfer the total unstaked amount and rewards back to the user
-        ERC20(stblCoin).transfer(msg.sender, totalAmountToUnstake);
+        if (stakingData[msg.sender].staked == 0) {
+            stakingData[msg.sender].isStaked = false;
+            _removeStaker(msg.sender);
+        }
 
-        // Update the global and user's staked data
-        totalTBLStaked -= stakedAmount; // Decrease the global staked amount
-        stakingData[msg.sender].staked = 0; // Reset the user's staked amount
-        stakingData[msg.sender].isStaked = false; // Mark user as no longer staked
+        emit UnStake(_amount, msg.sender, _userId);
+    }
 
-        // Emit the unstake event
-        emit UnStake(stakedAmount, msg.sender, _userId);
+    /**
+     * @dev Internal function to remove a staker
+     * @param _staker Address of the staker to remove
+     */
+    function _removeStaker(address _staker) private {
+        uint256 index = stakerIndices[_staker];
+        uint256 lastIndex = stakers.length - 1;
+
+        if (index != lastIndex) {
+            address lastStaker = stakers[lastIndex];
+            stakers[index] = lastStaker;
+            stakerIndices[lastStaker] = index;
+        }
+
+        stakers.pop();
+        delete stakerIndices[_staker];
     }
 }
