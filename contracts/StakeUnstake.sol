@@ -81,16 +81,15 @@ interface IERC20 {
         address to,
         uint256 amount
     ) external returns (bool);
-
-    function mintReward(address _user, uint _amount) external;
-
-    function burn(uint256 _amount, uint256 _userId) external;
 }
 
+/// @title StakeUnstake
+/// @notice A contract for staking and unstaking tokens
+/// @dev Implements staking, unstaking, and management of stakers
 contract StakeUnstake {
     bytes private constant PREFIX = "\x19Ethereum Signed Message:\n32";
     address public stblToken;
-    address public Verifier;
+    address public verifier;
 
     //struct to manage user staking data
     struct userData {
@@ -104,80 +103,26 @@ contract StakeUnstake {
     // Mapping to store staker indices
     mapping(address => uint256) private stakerIndices;
 
+    // Mapping to check usedSignatures to prevent same Signatures use
+    mapping(bytes32 => bool) private usedSignatures;
+
     //Show the total staked STBL
     uint256 public totalStblStaked;
 
     //array to track all stakers
     address[] public stakers;
 
-    //event log for all function of STBL farm
-
-    event Stake(uint value, address userAddress, uint userId);
-
-    event UnStake(uint value, address userAddress, uint userId);
+    //events
+    event Staked(uint value, address userAddress, uint userId);
+    event Unstaked(uint value, address userAddress, uint userId);
 
     /**
      * @dev constructor for itializing the contract
      *Assingn the global variables to local variable.
      */
-    constructor(address _verifier, address _STBLToken) {
-        stblToken = _STBLToken;
-        Verifier = _verifier;
-    }
-
-    /**
-     * @dev internal stake function
-     * @param _stakeAmount will be amount which user want to stake.
-     * @param  _user user address
-     */
-
-    function _stake(
-        uint256 _stakeAmount,
-        address _user,
-        uint _userId,
-        uint _nonce,
-        bytes32 _hashedMessage,
-        uint256 _deadline,
-        uint8 _v,
-        bytes32 _r,
-        bytes32 _s
-    ) private {
-        require(block.timestamp <= _deadline, "ERC20Permit: expired deadline");
-        bytes32 hash = keccak256(
-            abi.encodePacked(_userId, _nonce, _stakeAmount, _deadline, _user)
-        );
-
-        require(hash == _hashedMessage, "invalid hash");
-        bytes32 prefixedHashMessage = keccak256(
-            abi.encodePacked(PREFIX, _hashedMessage)
-        );
-
-        address signer = ecrecover(prefixedHashMessage, _v, _r, _s);
-
-        require(signer == Verifier, "invalid signature");
-
-        require(
-            IERC20(stblToken).allowance(msg.sender, address(this)) >=
-                _stakeAmount,
-            "TBLStaking: Insufficient allowance"
-        );
-
-        require(_stakeAmount > 0, "Cannot stake zero tokens");
-
-        require(
-            IERC20(stblToken).transferFrom(_user, address(this), _stakeAmount),
-            "Transfer failed"
-        );
-
-        if (!stakingData[_user].isStaked) {
-            if (!stakingData[_user].isStaked) {
-                stakerIndices[_user] = stakers.length;
-                stakers.push(_user);
-                stakingData[_user].isStaked = true;
-            }
-        }
-        stakingData[_user].staked += _stakeAmount;
-        totalStblStaked += _stakeAmount;
+    constructor(address _verifier, address _stblToken) {
+        stblToken = _stblToken;
+        verifier = _verifier;
     }
 
     /**
@@ -205,19 +150,56 @@ contract StakeUnstake {
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) public {
-        _stake(
-            _stakeAmount,
-            _user,
-            _userId,
-            _nonce,
-            _hashedMessage,
-            _deadline,
-            _v,
-            _r,
-            _s
+    ) external {
+        require(_stakeAmount > 0, "STBLStaking: Cannot stake zero tokens");
+        require(block.timestamp <= _deadline, "ERC20Permit: expired deadline");
+
+        // Check token allowance
+        require(
+            IERC20(stblToken).allowance(_user, address(this)) >= _stakeAmount,
+            "STBLStaking: Insufficient allowance"
         );
-        emit Stake(_stakeAmount, _user, _userId);
+
+        // Hash and verify the message
+        bytes32 hash = keccak256(
+            abi.encodePacked(_userId, _nonce, _stakeAmount, _deadline, _user)
+        );
+
+        require(hash == _hashedMessage, "STBLStaking: Invalid hash");
+
+        // Prefix the message and recover the signer
+        bytes32 prefixedHashMessage = keccak256(
+            abi.encodePacked(PREFIX, _hashedMessage)
+        );
+
+        address signer = ecrecover(prefixedHashMessage, _v, _r, _s);
+        require(
+            !usedSignatures[prefixedHashMessage],
+            "STBLStaking: Signature already used"
+        );
+        require(signer == verifier, "STBLStaking: Invalid signature");
+
+        // Mark the signature as used
+        usedSignatures[prefixedHashMessage] = true;
+
+        // Check if the user is staking for the first time
+        if (!stakingData[_user].isStaked) {
+            stakerIndices[_user] = stakers.length;
+            stakers.push(_user);
+            stakingData[_user].isStaked = true;
+        }
+
+        // Update user's stake and total staked amount
+        stakingData[_user].staked += _stakeAmount;
+        totalStblStaked += _stakeAmount;
+
+        // Transfer tokens from user to contract
+        require(
+            IERC20(stblToken).transferFrom(_user, address(this), _stakeAmount),
+            "Transfer failed"
+        );
+
+        emit Staked(_stakeAmount, _user, _userId);
     }
 
     /**
@@ -229,16 +211,12 @@ contract StakeUnstake {
         require(
             stakingData[msg.sender].staked >= _amount &&
                 stakingData[msg.sender].isStaked,
-            "No amount to unstake or claim"
+            "No amount to unstake"
         );
 
         uint256 contractBalance = IERC20(stblToken).balanceOf(address(this));
         require(contractBalance >= _amount, "Insufficient funds");
 
-        require(
-            IERC20(stblToken).transfer(msg.sender, _amount),
-            "Transfer failed"
-        );
         totalStblStaked -= _amount;
         stakingData[msg.sender].staked -= _amount;
 
@@ -247,12 +225,17 @@ contract StakeUnstake {
             _removeStaker(msg.sender);
         }
 
-        emit UnStake(_amount, msg.sender, _userId);
+        require(
+            IERC20(stblToken).transfer(msg.sender, _amount),
+            "Transfer failed"
+        );
+
+        emit Unstaked(_amount, msg.sender, _userId);
     }
 
     /**
      * @dev Internal function to remove a staker
-     * @param _staker Address of the staker to remove
+     * @param _staker address of the staker to remove
      */
     function _removeStaker(address _staker) private {
         uint256 index = stakerIndices[_staker];
