@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
-import "hardhat/console.sol";
 
 abstract contract Context {
     function _msgSender() internal view virtual returns (address) {
@@ -374,7 +373,6 @@ contract Redeem is Ownable, ReentrancyGuard {
                 path,
                 address(this)
             );
-        console.log(" ~ amountOut:", amountOut);
 
         IERC20(soilToken).burn(amountOut, _userId);
 
