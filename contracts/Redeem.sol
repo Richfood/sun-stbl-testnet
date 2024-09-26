@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.20;
+pragma solidity ^0.8.20;
+import "hardhat/console.sol";
 
 abstract contract Context {
     function _msgSender() internal view virtual returns (address) {
@@ -166,7 +167,7 @@ interface IPulseXSwapRouter {
     ) external payable returns (uint256 amountOut);
 }
 
-interface ERC20 {
+interface IERC20 {
     /**
      * @dev Emitted when `value` tokens are moved from one account (`from`) to
      * another (`to`).
@@ -247,18 +248,15 @@ interface ERC20 {
         uint256 amount
     ) external returns (bool);
 
-    function mintReward(address _user, uint _amount) external;
-
     function burn(uint256 _amount, uint256 _userId) external;
 }
 
 contract Redeem is Ownable, ReentrancyGuard {
-
-    address public stblCoin;
+    address public stblToken;
     address public pulsexRouter;
-    address public sunMinimealSOILToken;
+    address public soilToken;
 
-    uint256 public STBLLimitPerTransaction = 20000;
+    uint256 public stblRedeemLimitPerPeriod = 20000;
     uint256 public HOURS_GAP = 120 hours;
 
     mapping(address => uint256) public mintedTokens;
@@ -266,8 +264,8 @@ contract Redeem is Ownable, ReentrancyGuard {
 
     event Redeemed(
         address indexed user,
-        uint tblAmount,
-        uint mmBurned,
+        uint stblAmount,
+        uint soilBurned,
         uint userId
     );
 
@@ -275,83 +273,112 @@ contract Redeem is Ownable, ReentrancyGuard {
      * @dev constructor for itializing the contract
      *Assingn the global variables to local variable.
      */
-    constructor(address _owner, address _router, address _stblCoin, address _soilCoin) Ownable(_owner) {
+    constructor(
+        address _owner,
+        address _router,
+        address _stblToken,
+        address _soilToken
+    ) Ownable(_owner) {
         pulsexRouter = _router;
-        stblCoin=_stblCoin;
-        sunMinimealSOILToken=_soilCoin;
+        stblToken = _stblToken;
+        soilToken = _soilToken;
     }
 
-    function setSTBLLimitPerTransaction(uint _amount) public onlyOwner {
-        STBLLimitPerTransaction = _amount;
+    /**
+     * @dev Set the STBL limit per period
+     * @param _amount New limit amount
+     */
+    function setStblRedeemLimitPerPeriod(uint256 _amount) external onlyOwner {
+        require(_amount > 0, "Invalid limit amount");
+        stblRedeemLimitPerPeriod = _amount;
     }
 
-    function setHoursGap(uint256 _hours) public onlyOwner {
-        HOURS_GAP = _hours * 1 hours;
+    /**
+     * @dev Sets the hours gap for redemption
+     * @param _hoursGap New hours gap
+     */
+    function setHoursGap(uint256 _hoursGap) external onlyOwner {
+        require(_hoursGap > 0, "Invalid hours gap");
+        HOURS_GAP = _hoursGap * 1 hours;
     }
 
-    function setRouter(address _router) public onlyOwner {
-        pulsexRouter = _router;
+    /**
+     * @dev Set the PulseXRouter
+     * @param _routerAddress New router address
+     */
+    function setRouter(address _routerAddress) external onlyOwner {
+        require(_routerAddress != address(0), "Invalid router address");
+        pulsexRouter = _routerAddress;
     }
 
     /**
      * @dev Function to redeem tokens.
-     * @param amountIn The amount of tokens to redeem.
-     * @param amountOut The amount of tokens to swap.
+     * @param _amountIn The amount of tokens to redeem.
+     * @param _amountOutMin The amount of tokens to swap.
      * @param _userId ID of the user.
      */
     function redeem(
-        uint amountIn,
-        uint amountOut,
-        uint _userId
-    ) public nonReentrant {
+        uint256 _amountIn,
+        uint256 _amountOutMin,
+        uint256 _userId
+    ) external nonReentrant {
         require(
-            amountIn > 0 && amountOut > 0,
+            _amountIn > 0 && _amountOutMin > 0,
             "Amounts must be greater than zero"
         );
-
         require(
-            amountIn <= STBLLimitPerTransaction,
-            "you can't redeem more than a limit"
+            _amountIn <= stblRedeemLimitPerPeriod,
+            "Exceeds redemption limit"
         );
 
         // Check if 24 hours have passed since the last mint
         if (block.timestamp > lastMintTimestamp[msg.sender] + HOURS_GAP) {
-            // Reset the minted token count for the new day
+            // Reset the minted token counter for the new day
             mintedTokens[msg.sender] = 0;
             lastMintTimestamp[msg.sender] = block.timestamp;
         }
 
-        // Ensure the wallet can mint the requested amount
         require(
-            mintedTokens[msg.sender] + amountIn <= STBLLimitPerTransaction,
-            "Minting limit exceeded for today"
+            mintedTokens[msg.sender] + _amountIn <= stblRedeemLimitPerPeriod,
+            "Redemption limit exceeded"
+        );
+
+        // Transfer STBL to this smart contract
+        require(
+            IERC20(stblToken).transferFrom(
+                msg.sender,
+                address(this),
+                _amountIn
+            ),
+            "Transfer failed"
+        );
+
+        // Approve tokens for PulseX router
+        require(
+            IERC20(stblToken).approve(pulsexRouter, _amountIn),
+            "Approval failed"
         );
 
         // Increment the minted token count
-        mintedTokens[msg.sender] += amountIn;
+        mintedTokens[msg.sender] += _amountIn;
 
-        // Approve tokens for Uniswap router
-        ERC20(stblCoin).transferFrom(msg.sender, address(this), amountIn);
-        ERC20(stblCoin).approve(pulsexRouter, amountIn);
-
-        // Prepare path for token swap
         address[] memory path = new address[](2);
-        path[0] = stblCoin;
-        path[1] = sunMinimealSOILToken;
+        path[0] = stblToken;
+        path[1] = soilToken;
 
-        // Perform swap through Uniswap router
-        IPulseXSwapRouter(pulsexRouter).swapExactTokensForTokensV2(
-            amountIn,
-            amountOut,
-            path,
-            address(this)
-        );
+        // Perform swap through PulseX router
+        uint256 amountOut = IPulseXSwapRouter(pulsexRouter)
+            .swapExactTokensForTokensV2(
+                _amountIn,
+                _amountOutMin,
+                path,
+                address(this)
+            );
+        console.log(" ~ amountOut:", amountOut);
 
-        ERC20 mmToken = ERC20(sunMinimealSOILToken);
-        uint mmBalance = mmToken.balanceOf(address(this));
-        mmToken.burn(mmBalance, _userId);
+        IERC20(soilToken).burn(amountOut, _userId);
 
         // Emit event indicating redemption
-        emit Redeemed(msg.sender, amountIn, mmBalance, _userId);
+        emit Redeemed(msg.sender, _amountIn, amountOut, _userId);
     }
 }

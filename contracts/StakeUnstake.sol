@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.20;
+pragma solidity ^0.8.20;
 
 interface IERC20 {
     /**
@@ -123,6 +123,10 @@ contract StakeUnstake {
     constructor(address _verifier, address _stblToken) {
         stblToken = _stblToken;
         verifier = _verifier;
+    }
+
+    function checkStakers() public view returns (uint256) {
+        return stakers.length;
     }
 
     /**
